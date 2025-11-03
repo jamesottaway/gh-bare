@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+set -e
+
+usage() {
+    cat <<'EOF'
+Work with bare repositories.
+
+USAGE
+  gh bare <command> [flags]
+
+TARGETED COMMANDS
+  clone:        Clone a bare repository locally
+
+INHERITED FLAGS
+  --help   Show help for command
+
+ARGUMENTS
+  A repository can be supplied as an argument in any of the following formats:
+  - "OWNER/REPO"
+  - by URL, e.g. "https://github.com/OWNER/REPO"
+
+EXAMPLES
+  $ gh bare clone cli/cli
+
+EOF
+}
+
+clone() {
+  usage() {
+    cat <<'EOF'
+Clone a GitHub repository locally as a bare repository with a worktree for the default branch.
+
+If the `OWNER/` portion of the `OWNER/REPO` repository argument is omitted, it
+defaults to the name of the authenticating user.
+
+When a protocol scheme is not provided in the repository argument, the `git_protocol` will be
+chosen from your configuration, which can be checked via `gh config get git_protocol`. If the protocol
+scheme is provided, the repository will be cloned using the specified protocol.
+
+
+USAGE
+  gh bare clone <repository> [<directory>]
+
+EXAMPLES
+  $ gh bare clone cli/cli
+  $ gh bare clone myrepo
+  $ gh bare clone https://github.com/cli/cli
+  $ gh bare clone git@github.com:cli/cli.git
+  $ gh bare clone cli/cli my-cli-workspace
+
+EOF
+  }
+
+  if [ -z "$1" ]; then
+      cat <<'EOF'
+cannot clone: repository argument required
+
+Usage:  gh bare clone <repository> [<directory>]
+
+EOF
+    exit 1
+  fi
+
+  if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+    usage
+    return
+  fi
+
+  if [[ "$1" =~ ^-- ]]; then
+    cat << EOF
+unknown flag: '${1}'
+
+Usage:  gh bare clone <repository> [<directory>]
+
+EOF
+    exit 1
+  fi
+
+  if [[ "$1" =~ ^- ]]; then
+    cat << EOF
+unknown shorthand flag: '${1}'
+
+Usage:  gh bare clone <repository> [<directory>]
+
+EOF
+    exit 1
+  fi
+
+  repository=$1
+  basename=${repository##*/}
+  directory=${2:-${basename%.*}}
+  default_branch=$(gh repo view "$repository" --json defaultBranchRef -q ".defaultBranchRef.name")
+
+  gh repo clone "$repository" "${directory}/.git" -- --bare
+
+  echo 'Configuring `remote.origin.fetch`...'
+  git -C "$directory" config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+  git -C "$directory" config remote.origin.fetch
+
+  echo 'Fetching remote branches...'
+  git -C "$directory" fetch origin
+
+  echo 'Adding worktree for default branch...'
+  git -C "$directory" worktree add -B "$default_branch" "$default_branch" "origin/$default_branch" --track
+}
+
+if [ -z "$1" ]; then
+  usage
+  exit 0
+fi
+
+case "$1" in
+  clone)
+    clone "$2" "$3"
+    exit 0
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+if [[ "$1" =~ ^- ]]; then
+  cat << EOF
+unknown flag: ${1}
+
+Usage:  gh bare <command>
+
+Available commands:
+  clone
+
+EOF
+  exit 1
+fi
+
+cat << EOF
+unknown command "${1}" for "gh bare"
+
+Usage:  gh bare <command>
+
+Available commands:
+  clone
+
+EOF
+exit 1
